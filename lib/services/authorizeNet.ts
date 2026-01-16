@@ -785,7 +785,7 @@ export class AuthorizeNetService {
           },
           {
             settingName: 'hostedProfileReturnUrl',
-            settingValue: `${baseUrl}/profile-return.html`,
+            settingValue: `${baseUrl}/customers/${customerProfileId}?edited=true`,
           },
           {
             settingName: 'hostedProfileIFrameCommunicatorUrl',
@@ -1211,18 +1211,20 @@ export class AuthorizeNetService {
 
   /**
    * Update customer payment profile
-   * First fetches the full payment profile, then updates with all fields preserved
+   * First fetches the full payment profile, then updates with provided fields
    * @param customerProfileId Customer profile ID
    * @param paymentProfileId Payment profile ID
-   * @param firstName First name
-   * @param lastName Last name
+   * @param profileData Optional profile data with billTo and defaultPaymentProfile. If not provided, only firstName and lastName are required.
+   * @param firstName First name (required if profileData not provided)
+   * @param lastName Last name (required if profileData not provided)
    * @returns Updated payment profile ID
    */
   async updateCustomerPaymentProfile(
     customerProfileId: string,
     paymentProfileId: string,
-    firstName: string,
-    lastName: string
+    profileData?: { billTo?: any; defaultPaymentProfile?: boolean },
+    firstName?: string,
+    lastName?: string
   ): Promise<string> {
     // First, get the full payment profile to preserve all existing data
     const existingProfile = await this.getCustomerPaymentProfile(customerProfileId, paymentProfileId);
@@ -1230,53 +1232,81 @@ export class AuthorizeNetService {
     console.log(JSON.stringify(existingProfile, null, 2));
     console.log(`End showing existing profile`);
     // Extract the payment profile data (handle different response structures)
-    const profileData = existingProfile.paymentProfile || existingProfile;
+    const existingProfileData = existingProfile.paymentProfile || existingProfile;
     
-    // Build the payment profile with all existing fields, updating only firstName and lastName
+    // Build the payment profile with all existing fields, updating with provided data
     // Field order per API example: billTo, payment, defaultPaymentProfile, customerPaymentProfileId
     const paymentProfile: any = {};
 
-    // Build billTo with all existing fields, updating firstName and lastName
-    // billTo comes first in the structure
-    const billTo: any = {
-      firstName: firstName,
-      lastName: lastName,
-    };
-
-    // Preserve all other billTo fields if they exist (include empty strings to preserve them)
-    const existingBillTo = profileData.billTo || {};
-    billTo.company = existingBillTo.company !== undefined ? existingBillTo.company : '';
-    billTo.address = existingBillTo.address !== undefined ? existingBillTo.address : '';
-    billTo.city = existingBillTo.city !== undefined ? existingBillTo.city : '';
-    billTo.state = existingBillTo.state !== undefined ? existingBillTo.state : '';
-    billTo.zip = existingBillTo.zip !== undefined ? existingBillTo.zip : '';
-    billTo.country = existingBillTo.country !== undefined ? existingBillTo.country : '';
-    billTo.phoneNumber = existingBillTo.phoneNumber !== undefined ? existingBillTo.phoneNumber : '';
-    billTo.faxNumber = existingBillTo.faxNumber !== undefined ? existingBillTo.faxNumber : '';
+    // Build billTo - use provided data or fall back to firstName/lastName or existing data
+    const billTo: any = {};
+    
+    if (profileData?.billTo) {
+      // Use provided billTo data, preserving any missing fields from existing data
+      const existingBillTo = existingProfileData.billTo || {};
+      billTo.firstName = profileData.billTo.firstName !== undefined ? profileData.billTo.firstName : (existingBillTo.firstName || '');
+      billTo.lastName = profileData.billTo.lastName !== undefined ? profileData.billTo.lastName : (existingBillTo.lastName || '');
+      billTo.company = profileData.billTo.company !== undefined ? profileData.billTo.company : (existingBillTo.company || '');
+      billTo.address = profileData.billTo.address !== undefined ? profileData.billTo.address : (existingBillTo.address || '');
+      billTo.city = profileData.billTo.city !== undefined ? profileData.billTo.city : (existingBillTo.city || '');
+      billTo.state = profileData.billTo.state !== undefined ? profileData.billTo.state : (existingBillTo.state || '');
+      billTo.zip = profileData.billTo.zip !== undefined ? profileData.billTo.zip : (existingBillTo.zip || '');
+      billTo.country = profileData.billTo.country !== undefined ? profileData.billTo.country : (existingBillTo.country || '');
+      billTo.phoneNumber = profileData.billTo.phoneNumber !== undefined ? profileData.billTo.phoneNumber : (existingBillTo.phoneNumber || '');
+      billTo.faxNumber = profileData.billTo.faxNumber !== undefined ? profileData.billTo.faxNumber : (existingBillTo.faxNumber || '');
+    } else if (firstName !== undefined && lastName !== undefined) {
+      // Fall back to firstName/lastName parameters (backward compatibility)
+      const existingBillTo = existingProfileData.billTo || {};
+      billTo.firstName = firstName;
+      billTo.lastName = lastName;
+      billTo.company = existingBillTo.company !== undefined ? existingBillTo.company : '';
+      billTo.address = existingBillTo.address !== undefined ? existingBillTo.address : '';
+      billTo.city = existingBillTo.city !== undefined ? existingBillTo.city : '';
+      billTo.state = existingBillTo.state !== undefined ? existingBillTo.state : '';
+      billTo.zip = existingBillTo.zip !== undefined ? existingBillTo.zip : '';
+      billTo.country = existingBillTo.country !== undefined ? existingBillTo.country : '';
+      billTo.phoneNumber = existingBillTo.phoneNumber !== undefined ? existingBillTo.phoneNumber : '';
+      billTo.faxNumber = existingBillTo.faxNumber !== undefined ? existingBillTo.faxNumber : '';
+    } else {
+      // Use existing data if nothing provided
+      const existingBillTo = existingProfileData.billTo || {};
+      billTo.firstName = existingBillTo.firstName || '';
+      billTo.lastName = existingBillTo.lastName || '';
+      billTo.company = existingBillTo.company || '';
+      billTo.address = existingBillTo.address || '';
+      billTo.city = existingBillTo.city || '';
+      billTo.state = existingBillTo.state || '';
+      billTo.zip = existingBillTo.zip || '';
+      billTo.country = existingBillTo.country || '';
+      billTo.phoneNumber = existingBillTo.phoneNumber || '';
+      billTo.faxNumber = existingBillTo.faxNumber || '';
+    }
 
     paymentProfile.billTo = billTo;
 
     // Include payment information (required to preserve payment method)
-    if (profileData.payment) {
-      paymentProfile.payment = this.sanitizePaymentForUpdate(profileData.payment);
-    } else if (profileData.creditCard) {
+    if (existingProfileData.payment) {
+      paymentProfile.payment = this.sanitizePaymentForUpdate(existingProfileData.payment);
+    } else if (existingProfileData.creditCard) {
       // Handle case where creditCard is at root level
       paymentProfile.payment = {
-        creditCard: this.sanitizeCreditCardForUpdate(profileData.creditCard),
+        creditCard: this.sanitizeCreditCardForUpdate(existingProfileData.creditCard),
       };
-    } else if (profileData.bankAccount) {
+    } else if (existingProfileData.bankAccount) {
       // Handle bank account payments
       paymentProfile.payment = {
-        bankAccount: profileData.bankAccount,
+        bankAccount: existingProfileData.bankAccount,
       };
     } else {
       // Payment information is required - if missing, we can't update
       throw new Error('Payment information not found in payment profile. Cannot update without payment method.');
     }
 
-    // Include defaultPaymentProfile if it exists
-    if (profileData.defaultPaymentProfile !== undefined) {
+    // Include defaultPaymentProfile - use provided value or existing value
+    if (profileData?.defaultPaymentProfile !== undefined) {
       paymentProfile.defaultPaymentProfile = profileData.defaultPaymentProfile;
+    } else if (existingProfileData.defaultPaymentProfile !== undefined) {
+      paymentProfile.defaultPaymentProfile = existingProfileData.defaultPaymentProfile;
     }
 
     // Add customerPaymentProfileId last

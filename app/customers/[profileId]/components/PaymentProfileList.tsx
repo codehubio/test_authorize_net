@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface PaymentProfile {
   customerPaymentProfileId?: string;
@@ -52,6 +52,8 @@ interface PaymentProfileListProps {
   deletingProfileId: string | null;
   onCreateSubscription?: (paymentProfileId: string, subscriptionData: any) => void;
   creatingSubscriptionId?: string | null;
+  onEdit?: (paymentProfileId: string, profileData: PaymentProfile) => void;
+  editingProfileId?: string | null;
   customerProfileId?: string;
 }
 
@@ -62,10 +64,16 @@ export default function PaymentProfileList({
   deletingProfileId,
   onCreateSubscription,
   creatingSubscriptionId,
+  onEdit,
+  editingProfileId,
   customerProfileId,
 }: PaymentProfileListProps) {
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedPaymentProfileId, setSelectedPaymentProfileId] = useState<string | null>(null);
+  const [editFormUrl, setEditFormUrl] = useState<string | null>(null);
+  const [editToken, setEditToken] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [formData, setFormData] = useState({
     subscriptionName: '',
     amount: '',
@@ -111,6 +119,65 @@ export default function PaymentProfileList({
     if (selectedPaymentProfileId && onCreateSubscription) {
       onCreateSubscription(selectedPaymentProfileId, formData);
       handleCloseModal();
+    }
+  };
+
+  // Auto-submit form to iframe when modal opens
+  useEffect(() => {
+    if (showEditModal && editToken && editFormUrl && selectedPaymentProfileId) {
+      // Wait for iframe to be rendered, then submit form
+      const timer = setTimeout(() => {
+        const form = document.getElementById(`editForm_${selectedPaymentProfileId}`) as HTMLFormElement;
+        if (form) {
+          form.submit();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [showEditModal, editToken, editFormUrl, selectedPaymentProfileId]);
+
+  const handleOpenEditModal = async (profile: PaymentProfile) => {
+    if (!customerProfileId) return;
+    
+    const paymentProfileId = profile.customerPaymentProfileId || profile.paymentProfileId || '';
+    if (!paymentProfileId) return;
+
+    try {
+      setSelectedPaymentProfileId(paymentProfileId);
+      // Get token for hosted form
+      const response = await fetch(
+        `/api/authorize/hosted-profile-edit/${customerProfileId}/${paymentProfileId}`,
+        {
+          method: 'POST',
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to get edit form token');
+      }
+
+      // Store token and form URL for iframe
+      setEditToken(data.token);
+      setEditFormUrl(data.formUrl);
+      setShowEditModal(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open edit form');
+      console.error('Error opening edit form:', err);
+      setSelectedPaymentProfileId(null);
+    }
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditModal(false);
+    setEditFormUrl(null);
+    setEditToken(null);
+    setSelectedPaymentProfileId(null);
+    // Refresh the page data after closing (in case edits were made)
+    if (onEdit && customerProfileId) {
+      // Trigger a refresh by calling the parent's refresh function
+      window.location.reload();
     }
   };
   const formatCardNumber = (cardNumber?: string): string => {
@@ -290,6 +357,16 @@ export default function PaymentProfileList({
                   </td>
                   <td className="whitespace-nowrap px-6 py-4 text-sm">
                     <div className="flex items-center gap-2">
+                      {onEdit && customerProfileId && (
+                        <button
+                          onClick={() => handleOpenEditModal(profile)}
+                          disabled={editingProfileId === paymentProfileId || selectedPaymentProfileId === paymentProfileId}
+                          className="rounded bg-yellow-600 px-3 py-1 text-xs font-medium text-white hover:bg-yellow-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Edit payment profile"
+                        >
+                          {selectedPaymentProfileId === paymentProfileId ? 'Loading...' : 'Edit'}
+                        </button>
+                      )}
                       {onCreateSubscription && (
                         <button
                           onClick={() => handleOpenModal(paymentProfileId)}
@@ -336,22 +413,22 @@ export default function PaymentProfileList({
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Subscription Name <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-gray-900">
+                  Subscription Name <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={formData.subscriptionName}
                   onChange={(e) => setFormData({ ...formData, subscriptionName: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                   placeholder="e.g., Monthly Plan"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Amount ($) <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-gray-900">
+                  Amount ($) <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="number"
@@ -360,28 +437,28 @@ export default function PaymentProfileList({
                   required
                   value={formData.amount}
                   onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                   placeholder="0.00"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Interval Length</label>
+                  <label className="block text-sm font-medium text-gray-900">Interval Length</label>
                   <input
                     type="number"
                     min="1"
                     value={formData.intervalLength}
                     onChange={(e) => setFormData({ ...formData, intervalLength: e.target.value })}
-                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Interval Unit</label>
+                  <label className="block text-sm font-medium text-gray-900">Interval Unit</label>
                   <select
                     value={formData.intervalUnit}
                     onChange={(e) => setFormData({ ...formData, intervalUnit: e.target.value as 'days' | 'months' })}
-                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                   >
                     <option value="days">Days</option>
                     <option value="months">Months</option>
@@ -390,49 +467,49 @@ export default function PaymentProfileList({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Start Date</label>
+                <label className="block text-sm font-medium text-gray-900">Start Date</label>
                 <input
                   type="date"
                   required
                   value={formData.startDate}
                   onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">Total Occurrences</label>
+                <label className="block text-sm font-medium text-gray-900">Total Occurrences</label>
                 <input
                   type="number"
                   min="1"
                   value={formData.totalOccurrences}
                   onChange={(e) => setFormData({ ...formData, totalOccurrences: e.target.value })}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                  className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                   placeholder="12"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Trial Occurrences</label>
+                  <label className="block text-sm font-medium text-gray-900">Trial Occurrences</label>
                   <input
                     type="number"
                     min="0"
                     value={formData.trialOccurrences}
                     onChange={(e) => setFormData({ ...formData, trialOccurrences: e.target.value })}
-                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                     placeholder="0"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Trial Amount ($)</label>
+                  <label className="block text-sm font-medium text-gray-900">Trial Amount ($)</label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={formData.trialAmount}
                     onChange={(e) => setFormData({ ...formData, trialAmount: e.target.value })}
-                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+                    className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-blue-500"
                     placeholder="0.00"
                   />
                 </div>
@@ -454,6 +531,48 @@ export default function PaymentProfileList({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Payment Profile Modal with Iframe */}
+      {showEditModal && editFormUrl && editToken && selectedPaymentProfileId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="w-full max-w-4xl rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Edit Payment Profile</h3>
+              <button
+                onClick={handleCloseEditModal}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="relative" style={{ minHeight: '600px' }}>
+                <form
+                  id={`editForm_${selectedPaymentProfileId}`}
+                  method="POST"
+                  action={editFormUrl}
+                  target={`editIframe_${selectedPaymentProfileId}`}
+                  className="hidden"
+                >
+                  <input type="hidden" name="token" value={editToken} />
+                  <input type="hidden" name="paymentProfileId" value={selectedPaymentProfileId} />
+                </form>
+                <iframe
+                  ref={iframeRef}
+                  id={`editIframe_${selectedPaymentProfileId}`}
+                  name={`editIframe_${selectedPaymentProfileId}`}
+                  className="w-full border-0"
+                  style={{ minHeight: '600px', width: '100%' }}
+                  title="Edit Payment Profile"
+                  allow="payment"
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

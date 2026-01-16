@@ -86,6 +86,7 @@ export default function CustomerDetailPage() {
   const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
   const [cancelingSubscriptionId, setCancelingSubscriptionId] = useState<string | null>(null);
   const [creatingSubscriptionId, setCreatingSubscriptionId] = useState<string | null>(null);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     // Wait for params to be available
@@ -103,6 +104,17 @@ export default function CustomerDetailPage() {
     }
 
     fetchCustomerDetails(id);
+
+    // Check if we're returning from hosted form edit
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('edited') === 'true') {
+      // Refresh data after edit
+      setTimeout(() => {
+        fetchCustomerDetails(id);
+        // Remove the query parameter from URL
+        window.history.replaceState({}, '', window.location.pathname);
+      }, 500);
+    }
   }, [params]);
 
   const fetchCustomerDetails = async (id: string) => {
@@ -231,6 +243,22 @@ export default function CustomerDetailPage() {
     } finally {
       setCreatingSubscriptionId(null);
     }
+  };
+
+  const handleEditPaymentProfile = async (paymentProfileId: string, profileData: PaymentProfile) => {
+    // This function is called when the hosted form is opened
+    // The actual editing happens in the Authorize.net hosted form
+    // After the user completes editing, they'll be redirected back
+    // We can refresh the page data when they return
+    if (!profileId) return;
+    
+    // The hosted form will handle the editing
+    // We just need to refresh the data when the user returns
+    // This could be done via a callback URL or by checking window focus
+    window.addEventListener('focus', () => {
+      // Refresh data when window regains focus (user returns from hosted form)
+      fetchCustomerDetails(profileId);
+    }, { once: true });
   };
 
 
@@ -381,6 +409,8 @@ export default function CustomerDetailPage() {
           deletingProfileId={deletingProfileId}
           onCreateSubscription={handleCreateSubscription}
           creatingSubscriptionId={creatingSubscriptionId}
+          onEdit={handleEditPaymentProfile}
+          editingProfileId={editingProfileId}
           customerProfileId={customerProfile.profileId}
         />
       </div>
