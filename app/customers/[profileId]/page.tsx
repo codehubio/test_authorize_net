@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import SubscriptionList from './components/SubscriptionList';
@@ -87,6 +87,9 @@ export default function CustomerDetailPage() {
   const [cancelingSubscriptionId, setCancelingSubscriptionId] = useState<string | null>(null);
   const [creatingSubscriptionId, setCreatingSubscriptionId] = useState<string | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [addPaymentToken, setAddPaymentToken] = useState<string | null>(null);
+  const [addPaymentFormUrl, setAddPaymentFormUrl] = useState<string | null>(null);
 
   useEffect(() => {
     // Wait for params to be available
@@ -261,6 +264,57 @@ export default function CustomerDetailPage() {
     }, { once: true });
   };
 
+  const handleAddPaymentProfile = async () => {
+    if (!profileId) return;
+
+    try {
+      // Get token for hosted form
+      const response = await fetch(`/api/authorize/hosted-profile-add/${profileId}`, {
+        method: 'POST',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to get add payment form token');
+      }
+
+      // Store token and form URL for iframe
+      setAddPaymentToken(data.token);
+      setAddPaymentFormUrl(data.formUrl);
+      setShowAddPaymentModal(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to open add payment form');
+      console.error('Error opening add payment form:', err);
+    }
+  };
+
+  const handleCloseAddPaymentModal = () => {
+    setShowAddPaymentModal(false);
+    setAddPaymentFormUrl(null);
+    setAddPaymentToken(null);
+    // Refresh the page data after closing (in case a payment profile was added)
+    if (profileId) {
+      fetchCustomerDetails(profileId);
+    }
+  };
+
+  const addPaymentIframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Auto-submit form to iframe when modal opens
+  useEffect(() => {
+    if (showAddPaymentModal && addPaymentToken && addPaymentFormUrl) {
+      // Wait for iframe to be rendered, then submit form
+      const timer = setTimeout(() => {
+        const form = document.getElementById('addPaymentForm') as HTMLFormElement;
+        if (form) {
+          form.submit();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [showAddPaymentModal, addPaymentToken, addPaymentFormUrl]);
+
 
   if (loading) {
     return (
@@ -358,7 +412,16 @@ export default function CustomerDetailPage() {
         {/* Customer Profile Section */}
         <div className="mb-8 overflow-hidden rounded-lg bg-white shadow">
           <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-            <h2 className="text-lg font-semibold text-gray-900">Customer Profile</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Customer Profile</h2>
+              <button
+                onClick={handleAddPaymentProfile}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                title="Add new payment profile"
+              >
+                + Add Payment Profile
+              </button>
+            </div>
           </div>
           <div className="px-6 py-4">
             <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -413,6 +476,47 @@ export default function CustomerDetailPage() {
           editingProfileId={editingProfileId}
           customerProfileId={customerProfile.profileId}
         />
+
+        {/* Add Payment Profile Modal with Iframe */}
+        {showAddPaymentModal && addPaymentFormUrl && addPaymentToken && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+            <div className="w-full max-w-4xl rounded-lg bg-white shadow-xl">
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h3 className="text-lg font-semibold text-gray-900">Add Payment Profile</h3>
+                <button
+                  onClick={handleCloseAddPaymentModal}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-6">
+                <div className="relative" style={{ minHeight: '600px' }}>
+                  <form
+                    id="addPaymentForm"
+                    method="POST"
+                    action={addPaymentFormUrl}
+                    target="addPaymentIframe"
+                    className="hidden"
+                  >
+                    <input type="hidden" name="token" value={addPaymentToken} />
+                  </form>
+                  <iframe
+                    ref={addPaymentIframeRef}
+                    id="addPaymentIframe"
+                    name="addPaymentIframe"
+                    className="w-full border-0"
+                    style={{ minHeight: '600px', width: '100%' }}
+                    title="Add Payment Profile"
+                    allow="payment"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
